@@ -1,4 +1,4 @@
-// Independent truth-table audit of the unmodified native MiniCard API.
+// Independent truth-table audit of the native MiniCard API.
 #include "minicard/Solver.h"
 #include <algorithm>
 #include <cstdlib>
@@ -103,15 +103,34 @@ static void intervals(int mode) {
         }
     }
 }
-static void edge_api(const std::string& action) {
-    Solver s;for(int i=0;i<4;++i)s.newVar();vec<Lit> ps;ps.push(mkLit(0));ps.push(mkLit(1));ps.push(mkLit(2));
-    s.addAtMost(ps,1);
-    if(action=="interrupt") {
-        s.interrupt();vec<Lit> as;std::cout<<"limited="<<toInt(s.solveLimited(as))<<" bool="<<s.solve()<<" okay="<<s.okay()<<'\n';
-        s.clearInterrupt();if(s.solveLimited(as)!=l_True)std::abort();return;
+static void multisets(int mode, std::vector<int>& literals, int first = 0) {
+    for (int bound = -1; bound <= int(literals.size())+1; ++bound) for (int detect = 0; detect < 2; ++detect) {
+        Solver s;s.ccmin_mode=mode;s.detect_clause=detect;
+        for(int i=0;i<3;++i)s.newVar();
+        std::vector<Constraint> cs{{literals,bound,false}};add(s,cs[0]);check(s,3,cs,{});
+        for(unsigned mask=0;mask<8;++mask) {
+            std::vector<int> as;
+            for(int i=0;i<3;++i)as.push_back((mask&(1u<<i))?i+1:-(i+1));
+            check(s,3,cs,as);
+        }
     }
+    if(literals.size()==6)return;
+    for(int i=first;i<6;++i) {
+        literals.push_back((i%2?-1:1)*(i/2+1));
+        multisets(mode,literals,i);literals.pop_back();
+    }
+}
+static void edge_api(int mode) {
+    Solver s;for(int i=0;i<4;++i)s.newVar();vec<Lit> ps;ps.push(mkLit(0));ps.push(mkLit(1));ps.push(mkLit(2));
+    s.ccmin_mode=mode;
+    s.addAtMost(ps,1);
+    vec<Lit> as;s.interrupt();
+    if(s.solveLimited(as)!=l_Undef||!s.okay())std::abort();
+    s.clearInterrupt();s.setConfBudget(0);
+    if(s.solveLimited(as)!=l_Undef||!s.okay())std::abort();
+    s.budgetOff();if(s.solveLimited(as)!=l_True)std::abort();queries+=3;
     for(int n:{35,64,65,100,129})for(int k:{0,1,n/2,n-1,n}) {
-        Solver w;vec<Lit> a,b;for(int i=0;i<n;++i){w.newVar();a.push(mkLit(i));b.push(~mkLit(i));}
+        Solver w;w.ccmin_mode=mode;vec<Lit> a,b;for(int i=0;i<n;++i){w.newVar();a.push(mkLit(i));b.push(~mkLit(i));}
         w.addAtMost(a,k);w.addAtMost(b,n-k);vec<Lit> none;
         if(w.solveLimited(none)!=l_True)std::abort();int count=0;for(int i=0;i<n;++i)count+=w.modelValue(i)==l_True;
         if(count!=k)std::abort();w.garbageCollect();if(w.solveLimited(none)!=l_True)std::abort();
@@ -120,7 +139,9 @@ static void edge_api(const std::string& action) {
 }
 int main(int argc,char**argv) {
     int mode=argc>1?std::atoi(argv[1]):2,trials=argc>2?std::atoi(argv[2]):2000;
+    if(mode<0||mode>2||trials<0)return 2;
     unsigned seed=argc>3?std::strtoul(argv[3],NULL,10):20260908u;
-    random_api(mode,trials,seed);intervals(mode);edge_api("wide");
+    std::vector<int> literals;
+    random_api(mode,trials,seed);intervals(mode);edge_api(mode);multisets(mode,literals);
     std::cout<<"PASS queries="<<queries<<" ccmin="<<mode<<" trials="<<trials<<" seed="<<seed<<'\n';
 }
