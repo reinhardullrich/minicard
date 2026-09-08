@@ -1210,7 +1210,12 @@ void Solver::toDimacs(const char *file, const vec<Lit>& assumps)
     FILE* f = fopen(file, "w");
     if (f == NULL)
         fprintf(stderr, "could not open file %s\n", file), exit(1);
-    toDimacs(f, assumps);
+    try {
+        toDimacs(f, assumps);
+    } catch (...) {
+        fclose(f);
+        throw;
+    }
     fclose(f);
 }
 
