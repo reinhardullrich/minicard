@@ -7,6 +7,7 @@
 #include <random>
 #include <sstream>
 #include <vector>
+#include <unistd.h>
 using namespace Minisat;
 
 struct Constraint {
@@ -24,7 +25,32 @@ static bool satisfies(const std::vector<Constraint>& constraints, unsigned mask)
     return true;
 }
 
+static void full_parser() {
+    const char* inputs[] = {
+        "* root propagation\n+1 x1 >= 1;\n+1 x1 +1 x2 = 1;\n",
+        "+1 x1 -1 x1 +1 x2 = 1;\n",
+        "+1 x1 +1 x1 +1 x2 = 1;\n",
+        "-1 x1 +1 x2 = -1;\n",
+        "+1 x1 +1 x2 = 0;\n+1 x1 +1 x2 = 1;\n",
+        "* only a comment, no constraints\n"
+    };
+    unsigned allowed[] = {2,12,4,2,0,15};
+    for(unsigned i=0;i<sizeof(allowed)/sizeof(allowed[0]);++i) {
+        Solver s;s.newVar();s.newVar();
+        FILE* file=tmpfile();if(file==NULL)std::abort();
+        fputs(inputs[i],file);rewind(file);
+        int fd=dup(fileno(file));if(fd<0)std::abort();
+        gzFile stream=gzdopen(fd,"rb");if(stream==NULL)std::abort();
+        parse_OPB(stream,s);gzclose(stream);fclose(file);
+        for(unsigned mask=0;mask<4;++mask) {
+            vec<Lit> as;as.push(mkLit(0,!(mask&1)));as.push(mkLit(1,!(mask&2)));
+            if(s.solveLimited(as)!=((allowed[i]&(1u<<mask))?l_True:l_False))std::abort();
+        }
+    }
+}
+
 int main() {
+    full_parser();
     {
         Solver s;
         const char* input = "+1 x1 >= 1;";
@@ -46,11 +72,14 @@ int main() {
         std::vector<Constraint> constraints;
         for (int stage = 0; stage < 5; ++stage) {
             Constraint c;
+            c.coefficients.assign(n,0);
             c.bound = 0;
             std::ostringstream line;
-            for (int j = 0; j < n; ++j) {
+            int occurrences = trial%2 ? n : 1+rng()%(2*n);
+            for (int occurrence = 0; occurrence < occurrences; ++occurrence) {
+                int j = trial%2 ? occurrence : rng()%n;
                 int coefficient = rng() % 2 ? 1 : -1;
-                c.coefficients.push_back(coefficient);
+                c.coefficients[j] += coefficient;
                 line << (coefficient > 0 ? "+1" : "-1") << " x" << j + 1 << ' ';
                 if (planted & (1u << j)) c.bound += coefficient;
             }
